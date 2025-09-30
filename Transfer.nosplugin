@@ -1,0 +1,14 @@
+{
+    "info": {
+        "id": {
+            "name": "nos.transfer",
+            "version": "0.1.0"
+        },
+        "display_name": "Transfer Subsystem",
+        "description": "Allows plugins to perform copy operations without having to know type information",
+        "dependencies": []
+    },
+    "binary_path": "Binaries/nosTransfer",
+    "defaults": [],
+    "custom_types": []
+}
