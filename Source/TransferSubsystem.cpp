@@ -109,7 +109,10 @@ struct Context
 					auto clone = srcElements[i].Clone();
 					if (!clone.IsValid())
 						return NOS_RESULT_FAILED;
-					auto res = nosEngine.ObjectAPI->InsertArrayElement(dst, clone.Handle, nullptr);
+					auto res = Copy(srcElements[i].Handle, clone.Handle);
+					if (res != NOS_RESULT_SUCCESS)
+						return res;
+					res = nosEngine.ObjectAPI->InsertArrayElement(dst, clone.Handle, nullptr);
 					if (res != NOS_RESULT_SUCCESS)
 						return res;
 				}
