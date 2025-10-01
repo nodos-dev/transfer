@@ -53,11 +53,77 @@ struct Context
 	nosResult CopyDefault(nosObjectHandle src, nosObjectHandle dst)
 	{
 		// TODO: Arrays, composites (?)
-		nosBuffer const* srcBuf = nullptr;
-		nosEngine.ObjectAPI->GetBufferView(src, &srcBuf);
-		if (!srcBuf)
-			return NOS_RESULT_INVALID_ARGUMENT;
-		return nosEngine.ObjectAPI->SetBuffer(dst, *srcBuf);
+		nosObjectContentType contentType{};
+		if (NOS_RESULT_SUCCESS != nosEngine.ObjectAPI->GetObjectContentType(src, &contentType))
+			return NOS_RESULT_FAILED;
+		switch (contentType)
+		{
+		case NOS_OBJECT_CONTENT_TYPE_BUFFER:
+			{
+				nosBuffer const* srcBuf = nullptr;
+				nosEngine.ObjectAPI->GetBufferView(src, &srcBuf);
+				if (!srcBuf)
+					return NOS_RESULT_INVALID_ARGUMENT;
+				return nosEngine.ObjectAPI->SetBuffer(dst, *srcBuf);
+			}
+		case NOS_OBJECT_CONTENT_TYPE_COMPOSITE:
+			{
+				return NOS_RESULT_NOT_IMPLEMENTED;
+			}
+		case NOS_OBJECT_CONTENT_TYPE_ARRAY:
+			{
+				// Copy array and all objects
+				size_t srcSize{}, dstSize{};
+				if (NOS_RESULT_SUCCESS != nosEngine.ObjectAPI->GetArraySize(src, &srcSize))
+					return NOS_RESULT_FAILED;
+				if (NOS_RESULT_SUCCESS != nosEngine.ObjectAPI->GetArraySize(dst, &dstSize))
+					return NOS_RESULT_FAILED;
+				std::vector<ObjectRef> srcElements(srcSize);
+				std::vector<ObjectRef> dstElements(dstSize);
+				for (size_t i = 0; i < srcSize; ++i)
+				{
+					ObjectRef srcElement{};
+					if (NOS_RESULT_SUCCESS != nosEngine.ObjectAPI->GetArrayElement(src, i, &srcElement.Handle))
+						return NOS_RESULT_FAILED;
+					srcElements[i] = std::move(srcElement);
+				}
+				for (size_t i = 0; i < dstSize; ++i)
+				{
+					ObjectRef dstElement{};
+					if (NOS_RESULT_SUCCESS != nosEngine.ObjectAPI->GetArrayElement(dst, i, &dstElement.Handle))
+						return NOS_RESULT_FAILED;
+					dstElements[i] = std::move(dstElement);
+				}
+				// Copy until the smaller size
+				size_t minSize = std::min(srcSize, dstSize);
+				for (size_t i = 0; i < minSize; ++i)
+				{
+					auto res = Copy(srcElements[i].Handle, dstElements[i].Handle);
+					if (res != NOS_RESULT_SUCCESS)
+						return res;
+				}
+				// If src is larger, add new elements
+				for (size_t i = minSize; i < srcSize; ++i)
+				{
+					// Clone
+					auto clone = srcElements[i].Clone();
+					if (!clone.IsValid())
+						return NOS_RESULT_FAILED;
+					auto res = nosEngine.ObjectAPI->InsertArrayElement(dst, clone.Handle, nullptr);
+					if (res != NOS_RESULT_SUCCESS)
+						return res;
+				}
+				// If dst is larger, remove extra elements
+				for (size_t i = dstSize; i > srcSize; --i)
+				{
+					auto res = nosEngine.ObjectAPI->RemoveArrayElement(dst, i - 1);
+					if (res != NOS_RESULT_SUCCESS)
+						return res;
+				}
+				return NOS_RESULT_SUCCESS;
+			}
+		}
+		return NOS_RESULT_INVALID_ARGUMENT;
 	}
 
 	nosBool CanCopy(nosObjectHandle src, nosObjectHandle dst)
