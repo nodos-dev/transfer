@@ -53,15 +53,15 @@ struct Context
 	nosResult CopyDefault(nosObjectHandle src, nosObjectHandle dst)
 	{
 		// TODO: Arrays, composites (?)
-		nosObjectContentType contentType{};
-		if (NOS_RESULT_SUCCESS != nosEngine.ObjectAPI->GetObjectContentType(src, &contentType))
+		nosObjectKind kind{};
+		if (NOS_RESULT_SUCCESS != nosEngine.ObjectAPI->GetObjectKind(src, &kind))
 			return NOS_RESULT_FAILED;
-		switch (contentType)
+		switch (kind)
 		{
-		case NOS_OBJECT_CONTENT_TYPE_BUFFER:
+		case NOS_OBJECT_KIND_PRIMITIVE:
 			{
 				nosBuffer const* srcBuf = nullptr;
-				nosEngine.ObjectAPI->GetBufferView(src, &srcBuf);
+				nosEngine.ObjectAPI->GetPrimitiveObjectDataView(src, &srcBuf);
 				if (!srcBuf)
 					return NOS_RESULT_INVALID_ARGUMENT;
 				return nosEngine.ObjectAPI->SetBuffer(dst, *srcBuf);
