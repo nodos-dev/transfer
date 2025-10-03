@@ -14,21 +14,35 @@ extern "C"
 
 typedef nosResult(*nosPfnCopyObject)(nosObjectHandle src, nosObjectHandle dst);
 
+typedef uint64_t nosTransferCopyDestination;
+	
 typedef struct nosTransferCopyFunctions
 {
 	/// Checks whether the destination is suitable for copying the source object into it.
-	nosBool (NOSAPI_CALL* CanCopy)(nosObjectHandle src, nosObjectHandle dst);
-	/// Copies the source object into the destination object.
-	/// When using the transfer subsystems' copy API, if there's no nosTransferCopyFunctions registered for the object's type,
-	/// it will use the object API's GetBuffer/SetBuffer functions to copy the object data.
-	nosResult (NOSAPI_CALL* Copy)(nosObjectHandle src, nosObjectHandle dst);
+	nosResult (NOSAPI_CALL* CanCopy)(nosObjectHandle src, nosObjectHandle dst);
+	nosResult (NOSAPI_CALL* Copy)(nosObjectHandle src, nosObjectHandle* inoutDst);
 } nosTransferCopyFunctions;
 
 typedef struct nosTransferSubsystem {
 	nosResult (NOSAPI_CALL* RegisterCopyFunctions)(nosName objectTypeName, const nosTransferCopyFunctions* functions);
 	nosResult (NOSAPI_CALL* UnregisterCopyFunctions)(nosName objectTypeName);
 
-	nosTransferCopyFunctions* CopyAPI;
+	/// Creates a slot that will be used for copying the object.
+	nosResult (NOSAPI_CALL* CreateCopyDestination)(nosObjectHandle copySource, nosTransferCopyDestination* outDestination);
+	nosResult (NOSAPI_CALL* ReleaseCopyDestination)(nosTransferCopyDestination destination);
+	/// Copies the source object into the copy destination.
+	/// When using the transfer subsystems' copy API, if there's no nosTransferCopyFunctions registered for the object's type,
+	/// default implementation will do the following:
+	/// - For all immutable types, it will only set the object handle inside the copy destination to the source object handle.
+	/// - If the type contains a foreign object, it will do a shallow copy of the object and call the
+	///   foreign object's copy function if available.
+	///   If it is not available, it will simply construct a new foreign object from the source object's serialized buffer.
+	///   All the rest of the fields' object handles will be set to the source object's fields'.
+	/// inoutCopiedObject should point to a null object handle for non-foreign objects, and for foreign objects,
+	/// it should point to a valid object handle of the same type as src.
+	nosResult (NOSAPI_CALL* Copy)(nosObjectHandle src, nosTransferCopyDestination dst);
+	nosBool (NOSAPI_CALL* CanCopy)(nosObjectHandle src, nosTransferCopyDestination dst);
+	nosResult (NOSAPI_CALL* GetObjectHandle)(nosTransferCopyDestination dst, nosObjectHandle* outObjectHandle);
 } nosTransferSubsystem;
 
 #pragma region Helper Declarations & Macros
