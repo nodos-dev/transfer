@@ -22,7 +22,7 @@ struct Context
 {
 	nosResult RegisterCopyFunctions(nos::Name objectTypeName, const nosTransferCopyFunctions* funcs)
 	{
-		std::unique_lock lock(CopyFunctionsMutex);
+		std::unique_lock lock(CopyMutex);
 		if (CopyFunctions.contains(objectTypeName))
 			return NOS_RESULT_INVALID_ARGUMENT;
 		if (!funcs || (!funcs->CanCopy && !funcs->Copy))
@@ -33,7 +33,7 @@ struct Context
 
 	nosResult UnregisterCopyFunctions(nos::Name objectTypeName)
 	{
-		std::unique_lock lock(CopyFunctionsMutex);
+		std::unique_lock lock(CopyMutex);
 		auto it = CopyFunctions.find(objectTypeName);
 		if (it == CopyFunctions.end())
 			return NOS_RESULT_INVALID_ARGUMENT;
@@ -41,33 +41,31 @@ struct Context
 		return NOS_RESULT_SUCCESS;
 	}
 
-	nosResult Copy(nosObjectHandle src, nosTransferCopyDestination dst)
+	nosResult Copy(nosObjectHandle src, nosTransferCopyDestination dstSlot)
 	{
+		std::unique_lock lock(CopyMutex);
 		nosName srcTypeName{}, dstTypeName{};
 		if (nosEngine.ObjectAPI->GetObjectTypeName(src, &srcTypeName) != NOS_RESULT_SUCCESS)
 			return NOS_RESULT_INVALID_ARGUMENT;
-		if (nosEngine.ObjectAPI->GetObjectTypeName(dst, &dstTypeName) != NOS_RESULT_SUCCESS)
+		auto copyDst = GetCopyDestination(dstSlot);
+		if (!copyDst)
+			return NOS_RESULT_INVALID_ARGUMENT;
+		if (nosEngine.ObjectAPI->GetObjectTypeName(*copyDst, &dstTypeName) != NOS_RESULT_SUCCESS)
 			return NOS_RESULT_INVALID_ARGUMENT;
 		if (srcTypeName != dstTypeName)
 			return NOS_RESULT_INVALID_ARGUMENT;
-		std::shared_lock lock(CopyFunctionsMutex);
+		
 		auto it = CopyFunctions.find(srcTypeName);
 		if (it == CopyFunctions.end())
-			return CopyDefault(src, dst); 
+			return CopyDefault(src, dstSlot); 
 		lock.unlock();
 		if (!it->second.Copy)
 			return NOS_RESULT_NOT_IMPLEMENTED;
-		std::shared_lock slotsLock(SlotsMutex);
-		auto sit = Slots.find(dst);
-		if (sit == Slots.end())
-			return NOS_RESULT_INVALID_ARGUMENT;
-		auto dstHandle = sit->second->Destination.Handle;
+		auto dstHandle = copyDst->Handle;
 		auto res = it->second.Copy(src, &dstHandle);
 		if (res == NOS_RESULT_SUCCESS)
 		{
-			slotsLock.unlock();
-			std::unique_lock slotsWriteLock(SlotsMutex);
-			Slots[dst]->Destination = ObjectRef(dstHandle);
+			Slots[dstSlot]->Destination = ObjectRef(dstHandle);
 		}
 		return res;
 	}
@@ -77,11 +75,13 @@ struct Context
 		nosObjectKind kind{};
 		if (NOS_RESULT_SUCCESS != nosEngine.ObjectAPI->GetObjectKind(src, &kind))
 			return NOS_RESULT_FAILED;
+		ObjectRef copied;
 		switch (kind)
 		{
 		case NOS_OBJECT_KIND_PRIMITIVE:
 			{
-				return src;
+				copied = src;
+				break;
 			}
 		case NOS_OBJECT_KIND_COMPOSITE:
 			{
@@ -93,51 +93,72 @@ struct Context
 					return ObjectRef();
 				if (!ContainsForeignObject(srcTypeName))
 				{
-					return src;
+					copied = src;
+					break;
 				}
 				// Now, we have to shallow copy the composite object, and then deep copy any foreign fields.
 				std::vector<nosCompositeObjectField> foreignObjectContainingFields;
 				nosObjectHandle fieldHandle{};
 				nosName fieldName{};
 				size_t i = 0;
+				bool exit = false;
 				while (NOS_RESULT_SUCCESS == nosEngine.ObjectAPI->IterateFields(src, i++, &fieldName, &fieldHandle))
 				{
 					auto it = dstNode.CompositeChildren.find(fieldName);
 					if (it == dstNode.CompositeChildren.end())
-						return ObjectRef();
+					{
+						exit = true;
+						auto newDstFieldSlot = std::make_unique<CopyDestinationNode>();
+						newDstFieldSlot->Destination = fieldHandle;
+						auto res = PopulateCopyDestinationNode(fieldHandle, *newDstFieldSlot);
+						if (res != NOS_RESULT_SUCCESS)
+							break;
+						copied = newDstFieldSlot->Destination;
+						break;
+					}
 					auto& childNode = *it->second;
 					auto dst = TransferCopyRecursive(fieldHandle, childNode);
 					if (dst.Handle == fieldHandle)
 						continue;
 					foreignObjectContainingFields.push_back(nosCompositeObjectField{fieldName, dst.Handle});
 				}
+				if (exit)
+				{
+					break;
+				}
 				if (foreignObjectContainingFields.empty())
-					return src;
+				{
+					copied = src;
+					break;
+				}
 				ObjectRef newComposite{};
 				nosEngine.ObjectAPI->CopyCompositeObjectWithEdits(src, foreignObjectContainingFields.data(), foreignObjectContainingFields.size(), &newComposite.Handle);
-				return newComposite;
+				copied = newComposite;
+				break;
 			}
 		case NOS_OBJECT_KIND_ARRAY:
 			{
 				// If the array contains foreign objects, we should call copy on them,
 				// otherwise we can just copy the references.
-				return ObjectRef();
+				copied = ObjectRef();
+				break;
 			}
 		case NOS_OBJECT_KIND_FOREIGN:
 			{
 				ForeignObjectRef srcObj(src);
-				std::shared_lock lock(CopyFunctionsMutex);
 				auto it = CopyFunctions.find(srcObj.GetTypeName());
+				copied = dstNode.Destination;
 				if (it != CopyFunctions.end() && it->second.Copy)
-					it->second.Copy(src, &dstNode.Destination.Handle);
-				return dstNode.Destination;
+					it->second.Copy(src, &copied.Handle);
+				break;
 			}
 		}
+		dstNode.Destination = copied;
+		return copied;
 	}
 
 	nosResult CopyDefault(nosObjectHandle src, nosTransferCopyDestination dst)
 	{
-		std::shared_lock lock(SlotsMutex);
 		auto it = Slots.find(dst);
 		if (it == Slots.end())
 		{
@@ -153,40 +174,44 @@ struct Context
 
 	nosBool CanCopy(nosObjectHandle src, nosTransferCopyDestination dstSlot)
 	{
+		std::shared_lock lock(CopyMutex);
 		nosName srcTypeName{}, dstTypeName{};
 		if (nosEngine.ObjectAPI->GetObjectTypeName(src, &srcTypeName) != NOS_RESULT_SUCCESS)
 			return NOS_FALSE;
-		nosObjectHandle dst{};
-		{
-			auto lock = std::shared_lock(SlotsMutex);
-			auto it = Slots.find(dstSlot);
-			if (it == Slots.end())
-				return NOS_FALSE;
-			dst = it->second->Destination.Handle;
-		}
-		if (nosEngine.ObjectAPI->GetObjectTypeName(dst, &dstTypeName) != NOS_RESULT_SUCCESS)
+		auto copyDst = GetCopyDestination(dstSlot);
+		if (!copyDst)
+			return NOS_FALSE;
+		if (nosEngine.ObjectAPI->GetObjectTypeName(*copyDst, &dstTypeName) != NOS_RESULT_SUCCESS)
 			return NOS_FALSE;
 		if (srcTypeName != dstTypeName)
 			return NOS_FALSE;
-		std::shared_lock lock(CopyFunctionsMutex);
 		auto it = CopyFunctions.find(srcTypeName);
 		if (it == CopyFunctions.end())
 			return NOS_TRUE;
 		lock.unlock();
 		if (!it->second.CanCopy)
 			return NOS_TRUE;
-		return it->second.CanCopy(src, dst);
+		return it->second.CanCopy(src, *copyDst);
+	}
+
+	std::optional<ObjectRef> GetCopyDestination(nosTransferCopyDestination slot)
+	{
+		auto it = Slots.find(slot);
+		if (it == Slots.end())
+			return std::nullopt;
+		return it->second->Destination;
 	}
 
 	nosResult GetObjectHandle(nosTransferCopyDestination slot, nosObjectHandle* outObjectHandle)
 	{
 		if (!outObjectHandle)
 			return NOS_RESULT_INVALID_ARGUMENT;
-		std::shared_lock lock(SlotsMutex);
+		std::shared_lock lock(CopyMutex);
 		auto it = Slots.find(slot);
 		if (it == Slots.end())
 			return NOS_RESULT_INVALID_ARGUMENT;
-		*outObjectHandle = it->second->Destination.Handle;
+		ObjectRef ret = it->second->Destination;
+		*outObjectHandle = ret.Release();
 		return NOS_RESULT_SUCCESS;
 	}
 
@@ -235,19 +260,20 @@ struct Context
 	{
 		if (!outDst)
 			return NOS_RESULT_INVALID_ARGUMENT;
-		std::unique_lock lock(SlotsMutex);
+		std::unique_lock lock(CopyMutex);
 		auto slot = std::make_unique<CopyDestinationNode>();
 		auto& node = *slot;
-		Slots[NextSlotId++] = std::move(slot);
+		auto id = NextSlotId++;
+		Slots[id] = std::move(slot);
 		auto res = PopulateCopyDestinationNode(src, node);
 		if (res == NOS_RESULT_SUCCESS)
-			*outDst = node.Destination;
+			*outDst = id;
 		return res;
 	}
 
 	nosResult ReleaseCopyDestination(nosTransferCopyDestination dst)
 	{
-		std::unique_lock lock(SlotsMutex);
+		std::unique_lock lock(CopyMutex);
 		auto it = Slots.find(dst);
 		if (it == Slots.end())
 			return NOS_RESULT_INVALID_ARGUMENT;
@@ -308,9 +334,8 @@ struct Context
 		return NOS_RESULT_SUCCESS;
 	}
 
-	std::shared_mutex CopyFunctionsMutex;
+	std::shared_mutex CopyMutex;
 	std::unordered_map<nos::Name, nosTransferCopyFunctions> CopyFunctions;
-	std::shared_mutex SlotsMutex;
 	nosTransferCopyDestination NextSlotId = 1;
 	std::unordered_map<nosTransferCopyDestination, std::unique_ptr<CopyDestinationNode>> Slots;
 } GContext;
