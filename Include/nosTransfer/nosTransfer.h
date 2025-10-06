@@ -12,15 +12,13 @@ extern "C"
 
 #include <Nodos/PluginAPI.h>
 
-typedef nosResult(*nosPfnCopyObject)(nosObjectHandle src, nosObjectHandle dst);
-
-typedef uint64_t nosTransferCopyDestination;
-	
 typedef struct nosTransferCopyFunctions
 {
+	nosResult(NOSAPI_CALL* CreateCopyDestination)(nosObjectHandle copySource,
+												  nosObjectHandle* outDestination);
 	/// Checks whether the destination is suitable for copying the source object into it.
 	nosResult (NOSAPI_CALL* CanCopy)(nosObjectHandle src, nosObjectHandle dst);
-	nosResult (NOSAPI_CALL* Copy)(nosObjectHandle src, nosObjectHandle* inoutDst);
+	nosResult(NOSAPI_CALL* Copy)(nosObjectHandle src, nosObjectHandle dst, nosObjectHandle* outNewDst);
 } nosTransferCopyFunctions;
 
 typedef struct nosTransferSubsystem {
@@ -28,8 +26,7 @@ typedef struct nosTransferSubsystem {
 	nosResult (NOSAPI_CALL* UnregisterCopyFunctions)(nosName objectTypeName);
 
 	/// Creates a slot that will be used for copying the object.
-	nosResult (NOSAPI_CALL* CreateCopyDestination)(nosObjectHandle copySource, nosTransferCopyDestination* outDestination);
-	nosResult (NOSAPI_CALL* ReleaseCopyDestination)(nosTransferCopyDestination destination);
+	nosResult (NOSAPI_CALL* CreateCopyDestination)(nosObjectHandle copySource, nosObjectHandle* outDestination);
 	/// Copies the source object into the copy destination.
 	/// When using the transfer subsystems' copy API, if there's no nosTransferCopyFunctions registered for the object's type,
 	/// default implementation will do the following:
@@ -40,9 +37,8 @@ typedef struct nosTransferSubsystem {
 	///   All the rest of the fields' object handles will be set to the source object's fields'.
 	/// inoutCopiedObject should point to a null object handle for non-foreign objects, and for foreign objects,
 	/// it should point to a valid object handle of the same type as src.
-	nosResult (NOSAPI_CALL* Copy)(nosObjectHandle src, nosTransferCopyDestination dst);
-	nosBool (NOSAPI_CALL* CanCopy)(nosObjectHandle src, nosTransferCopyDestination dst);
-	nosResult (NOSAPI_CALL* GetObjectHandle)(nosTransferCopyDestination dst, nosObjectHandle* outObjectHandle);
+	nosResult(NOSAPI_CALL* Copy)(nosObjectHandle src, nosObjectHandle dstObj, nosObjectHandle* outNewDst);
+	nosBool (NOSAPI_CALL* CanCopy)(nosObjectHandle src, nosObjectHandle dst);
 } nosTransferSubsystem;
 
 #pragma region Helper Declarations & Macros
