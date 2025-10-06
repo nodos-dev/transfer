@@ -151,11 +151,19 @@ struct Context
 		return NOS_RESULT_SUCCESS;
 	}
 
-	nosBool CanCopy(nosObjectHandle src, nosObjectHandle dst)
+	nosBool CanCopy(nosObjectHandle src, nosTransferCopyDestination dstSlot)
 	{
 		nosName srcTypeName{}, dstTypeName{};
 		if (nosEngine.ObjectAPI->GetObjectTypeName(src, &srcTypeName) != NOS_RESULT_SUCCESS)
 			return NOS_FALSE;
+		nosObjectHandle dst{};
+		{
+			auto lock = std::shared_lock(SlotsMutex);
+			auto it = Slots.find(dstSlot);
+			if (it == Slots.end())
+				return NOS_FALSE;
+			dst = it->second->Destination.Handle;
+		}
 		if (nosEngine.ObjectAPI->GetObjectTypeName(dst, &dstTypeName) != NOS_RESULT_SUCCESS)
 			return NOS_FALSE;
 		if (srcTypeName != dstTypeName)
@@ -231,7 +239,10 @@ struct Context
 		auto slot = std::make_unique<CopyDestinationNode>();
 		auto& node = *slot;
 		Slots[NextSlotId++] = std::move(slot);
-		return PopulateCopyDestinationNode(src, node);
+		auto res = PopulateCopyDestinationNode(src, node);
+		if (res == NOS_RESULT_SUCCESS)
+			*outDst = node.Destination;
+		return res;
 	}
 
 	nosResult ReleaseCopyDestination(nosTransferCopyDestination dst)

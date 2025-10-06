@@ -19,7 +19,7 @@ typedef uint64_t nosTransferCopyDestination;
 typedef struct nosTransferCopyFunctions
 {
 	/// Checks whether the destination is suitable for copying the source object into it.
-	nosResult (NOSAPI_CALL* CanCopy)(nosObjectHandle src, nosObjectHandle dst);
+	nosBool (NOSAPI_CALL* CanCopy)(nosObjectHandle src, nosObjectHandle dst);
 	nosResult (NOSAPI_CALL* Copy)(nosObjectHandle src, nosObjectHandle* inoutDst);
 } nosTransferCopyFunctions;
 
