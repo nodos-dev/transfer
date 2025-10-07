@@ -65,7 +65,12 @@ struct Context
 		auto res = it->second.Copy(src, &dstHandle);
 		if (res == NOS_RESULT_SUCCESS)
 		{
-			Slots[dstSlot]->Destination = ObjectRef(dstHandle);
+			ObjectRef dstObj{};
+			if (copyDst != dstHandle)
+				dstObj = ObjectRef::AcquireOwnership(dstHandle);
+			else
+				dstObj = dstHandle;
+			Slots[dstSlot]->Destination = std::move(dstObj);
 		}
 		return res;
 	}
@@ -96,44 +101,41 @@ struct Context
 					copied = src;
 					break;
 				}
+				CompositeObjectRef compSrc(src);
 				// Now, we have to shallow copy the composite object, and then deep copy any foreign fields.
-				std::vector<nosCompositeObjectField> foreignObjectContainingFields;
-				nosObjectHandle fieldHandle{};
-				nosName fieldName{};
-				size_t i = 0;
+				std::vector<CompositeObjectField> foreignObjectContainingFields;
 				bool exit = false;
-				while (NOS_RESULT_SUCCESS == nosEngine.ObjectAPI->IterateFields(src, i++, &fieldName, &fieldHandle))
+				for (auto& field : compSrc)
 				{
-					auto it = dstNode.CompositeChildren.find(fieldName);
+					auto it = dstNode.CompositeChildren.find(field.Name);
 					if (it == dstNode.CompositeChildren.end())
 					{
 						exit = true;
 						auto newDstFieldSlot = std::make_unique<CopyDestinationNode>();
-						newDstFieldSlot->Destination = fieldHandle;
-						auto res = PopulateCopyDestinationNode(fieldHandle, *newDstFieldSlot);
+						newDstFieldSlot->Destination = field.Object;
+						auto res = PopulateCopyDestinationNode(field.Object, *newDstFieldSlot);
 						if (res != NOS_RESULT_SUCCESS)
 							break;
 						copied = newDstFieldSlot->Destination;
 						break;
 					}
 					auto& childNode = *it->second;
-					auto dst = TransferCopyRecursive(fieldHandle, childNode);
-					if (dst.Handle == fieldHandle)
+					auto dst = TransferCopyRecursive(field.Object, childNode);
+					if (dst == field.Object)
 						continue;
-					foreignObjectContainingFields.push_back(nosCompositeObjectField{fieldName, dst.Handle});
+					foreignObjectContainingFields.push_back(CompositeObjectField{field.Name, dst});
 				}
 				if (exit)
-				{
 					break;
-				}
 				if (foreignObjectContainingFields.empty())
 				{
 					copied = src;
 					break;
 				}
-				ObjectRef newComposite{};
-				nosEngine.ObjectAPI->CopyCompositeObjectWithEdits(src, foreignObjectContainingFields.data(), foreignObjectContainingFields.size(), &newComposite.Handle);
-				copied = newComposite;
+				auto copiedOpt = compSrc.CopyWithEdits(foreignObjectContainingFields);
+				if (!copiedOpt)
+					break;
+				copied = std::move(*copiedOpt);
 				break;
 			}
 		case NOS_OBJECT_KIND_ARRAY:
@@ -149,7 +151,12 @@ struct Context
 				auto it = CopyFunctions.find(srcObj.GetTypeName());
 				copied = dstNode.Destination;
 				if (it != CopyFunctions.end() && it->second.Copy)
-					it->second.Copy(src, &copied.Handle);
+				{
+					nosObjectHandle newDst = copied;
+					it->second.Copy(src, &newDst);
+					if (newDst != copied)
+						copied = ObjectRef::AcquireOwnership(newDst);
+				}
 				break;
 			}
 		}
@@ -296,22 +303,17 @@ struct Context
 			}
 		case NOS_OBJECT_KIND_COMPOSITE:
 			{
-				nosName srcTypeName{};
-				if (nosEngine.ObjectAPI->GetObjectTypeName(obj, &srcTypeName) != NOS_RESULT_SUCCESS)
-					return NOS_RESULT_FAILURE;
-				nosObjectHandle fieldHandle{};
-				nosName fieldName{};
-				size_t i = 0;
-				std::vector<nosCompositeObjectField> changedFields;
-				while (NOS_RESULT_SUCCESS == nosEngine.ObjectAPI->IterateFields(obj, i++, &fieldName, &fieldHandle))
+				CompositeObjectRef compositeObj(obj);
+				std::vector<CompositeObjectField> changedFields;
+				for (auto& field : compositeObj)
 				{
-					node.CompositeChildren[fieldName] = std::make_unique<CopyDestinationNode>();
-					auto res = PopulateCopyDestinationNode(fieldHandle, *node.CompositeChildren[fieldName]);
+					node.CompositeChildren[field.Name] = std::make_unique<CopyDestinationNode>();
+					auto res = PopulateCopyDestinationNode(field.Object, *node.CompositeChildren[field.Name]);
 					if (res != NOS_RESULT_SUCCESS)
 						return res;
-					if (fieldHandle != node.CompositeChildren[fieldName]->Destination.Handle)
+					if (field.Object.Handle != node.CompositeChildren[field.Name]->Destination.Handle)
 					{
-						changedFields.push_back({fieldName, node.CompositeChildren[fieldName]->Destination.Handle});
+						changedFields.push_back({field.Name, node.CompositeChildren[field.Name]->Destination});
 					}
 				}
 				if (changedFields.empty())
@@ -319,7 +321,10 @@ struct Context
 					node.Destination = obj;
 					return NOS_RESULT_SUCCESS;
 				}
-				return nosEngine.ObjectAPI->CopyCompositeObjectWithEdits(obj, changedFields.data(), changedFields.size(), &node.Destination.Handle);
+				auto dst = compositeObj.CopyWithEdits(changedFields);
+				if (!dst)
+					return NOS_RESULT_FAILURE;
+				node.Destination = std::move(*dst);
 			}
 		case NOS_OBJECT_KIND_ARRAY:
 			{
