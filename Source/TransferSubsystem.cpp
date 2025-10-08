@@ -140,9 +140,56 @@ struct Context
 			}
 		case NOS_OBJECT_KIND_ARRAY:
 			{
+				nosName srcTypeName{};
+				if (nosEngine.ObjectAPI->GetObjectTypeName(src, &srcTypeName) != NOS_RESULT_SUCCESS)
+					return ObjectRef();
 				// If the array contains foreign objects, we should call copy on them,
 				// otherwise we can just copy the references.
-				copied = ObjectRef();
+				if (!ContainsForeignObject(srcTypeName))
+				{
+					copied = src;
+					break;
+				}
+				std::vector<ArrayObjectDelta> edits;
+				ArrayObjectRef arraySrc(src);
+				std::vector<ArrayObjectDelta> foreignObjectContainingDeltas;
+				bool exit = false;
+				auto size = arraySrc.GetSize();
+				size_t i = 0;
+				for (auto& srcField : arraySrc)
+				{
+					if (i >= dstNode.ArrayChildren.size())
+					{
+						exit = true;
+						auto newDstFieldSlot = std::make_unique<CopyDestinationNode>();
+						newDstFieldSlot->Destination = srcField;
+						auto res = PopulateCopyDestinationNode(srcField, *newDstFieldSlot);
+						if (res != NOS_RESULT_SUCCESS)
+							break;
+						copied = newDstFieldSlot->Destination;
+						break;
+					}
+					auto& childNode = *dstNode.ArrayChildren[i];
+					auto dst = TransferCopyRecursive(srcField, childNode);
+					if (dst == srcField)
+					{
+						++i;
+						continue;
+					}
+					foreignObjectContainingDeltas.push_back(ArrayObjectDelta::Set(i, dst));
+					++i;
+				}
+				if (exit)
+					break;
+				if (foreignObjectContainingDeltas.empty())
+				{
+					copied = src;
+					break;
+				}
+				auto copiedOpt = arraySrc.CopyWithEdits(foreignObjectContainingDeltas);
+				if (!copiedOpt)
+					break;
+				copied = std::move(*copiedOpt);
 				break;
 			}
 		case NOS_OBJECT_KIND_FOREIGN:
@@ -325,10 +372,41 @@ struct Context
 				if (!dst)
 					return NOS_RESULT_FAILURE;
 				node.Destination = std::move(*dst);
+				return NOS_RESULT_SUCCESS;
 			}
 		case NOS_OBJECT_KIND_ARRAY:
 			{
-				return NOS_RESULT_NOT_IMPLEMENTED;
+				ArrayObjectRef arrayObj(obj);
+				std::vector<ArrayObjectDelta> changedElements;
+				size_t idx = 0;
+				for (auto& element : arrayObj)
+				{
+					bool append = node.ArrayChildren.size() <= idx;
+					if (append)
+						node.ArrayChildren.push_back(nullptr);
+					node.ArrayChildren[idx] = std::make_unique<CopyDestinationNode>();
+					auto res = PopulateCopyDestinationNode(element, *node.ArrayChildren[idx]);
+					if (res != NOS_RESULT_SUCCESS)
+						return res;
+					if (element.Handle != node.ArrayChildren[idx]->Destination.Handle)
+					{
+						if (append)
+							changedElements.push_back(ArrayObjectDelta::Append(node.ArrayChildren[idx]->Destination));
+						else
+							changedElements.push_back(ArrayObjectDelta::Set(idx, node.ArrayChildren[idx]->Destination));
+					}
+					idx++;
+				}
+				if (changedElements.empty())
+				{
+					node.Destination = obj;
+					return NOS_RESULT_SUCCESS;
+				}
+				auto dst = arrayObj.CopyWithEdits(changedElements);
+				if (!dst)
+					return NOS_RESULT_FAILURE;
+				node.Destination = std::move(*dst);
+				return NOS_RESULT_SUCCESS;
 			}
 		case NOS_OBJECT_KIND_FOREIGN:
 			{
