@@ -41,7 +41,7 @@ struct Context
 		return NOS_RESULT_SUCCESS;
 	}
 
-	nosResult Copy(nosObjectHandle src, nosTransferCopyDestination dstSlot)
+	nosResult Copy(nosObjectId src, nosTransferCopyDestination dstSlot)
 	{
 		std::unique_lock lock(CopyMutex);
 		nosName srcTypeName{}, dstTypeName{};
@@ -61,25 +61,19 @@ struct Context
 		lock.unlock();
 		if (!it->second.Copy)
 			return NOS_RESULT_NOT_IMPLEMENTED;
-		auto dstHandle = copyDst->Handle;
-		auto res = it->second.Copy(src, &dstHandle);
+		auto dst = copyDst->GetObjectId();
+		ObjectRef dstObj{};
+		auto res = it->second.Copy(src, dst, &dstObj.GetStorage());
 		if (res == NOS_RESULT_SUCCESS)
-		{
-			ObjectRef dstObj{};
-			if (copyDst != dstHandle)
-				dstObj = ObjectRef::AcquireOwnership(dstHandle);
-			else
-				dstObj = dstHandle;
 			Slots[dstSlot]->Destination = std::move(dstObj);
-		}
 		return res;
 	}
 
-	ObjectRef TransferCopyRecursive(nosObjectHandle src, CopyDestinationNode& dstNode)
+	ObjectRef TransferCopyRecursive(nosObjectId src, CopyDestinationNode& dstNode)
 	{
 		nosObjectKind kind{};
 		if (NOS_RESULT_SUCCESS != nosEngine.ObjectAPI->GetObjectKind(src, &kind))
-			return NOS_RESULT_FAILED;
+			return ObjectRef();
 		ObjectRef copied;
 		switch (kind)
 		{
@@ -199,10 +193,10 @@ struct Context
 				copied = dstNode.Destination;
 				if (it != CopyFunctions.end() && it->second.Copy)
 				{
-					nosObjectHandle newDst = copied;
-					it->second.Copy(src, &newDst);
-					if (newDst != copied)
-						copied = ObjectRef::AcquireOwnership(newDst);
+					nosObjectId newDst = copied.GetObjectId();
+					nosObjectReference newDstRef{};
+					it->second.Copy(src, newDst, &newDstRef);
+					copied = ObjectRef::AcquireOwnership(newDstRef);
 				}
 				break;
 			}
@@ -211,7 +205,7 @@ struct Context
 		return copied;
 	}
 
-	nosResult CopyDefault(nosObjectHandle src, nosTransferCopyDestination dst)
+	nosResult CopyDefault(nosObjectId src, nosTransferCopyDestination dst)
 	{
 		auto it = Slots.find(dst);
 		if (it == Slots.end())
@@ -226,7 +220,7 @@ struct Context
 		return NOS_RESULT_SUCCESS;
 	}
 
-	nosBool CanCopy(nosObjectHandle src, nosTransferCopyDestination dstSlot)
+	nosBool CanCopy(nosObjectId src, nosTransferCopyDestination dstSlot)
 	{
 		std::shared_lock lock(CopyMutex);
 		nosName srcTypeName{}, dstTypeName{};
@@ -256,16 +250,16 @@ struct Context
 		return it->second->Destination;
 	}
 
-	nosResult GetObjectHandle(nosTransferCopyDestination slot, nosObjectHandle* outObjectHandle)
+	nosResult GetObjectReference(nosTransferCopyDestination slot, nosObjectReference* outRef)
 	{
-		if (!outObjectHandle)
+		if (!outRef)
 			return NOS_RESULT_INVALID_ARGUMENT;
 		std::shared_lock lock(CopyMutex);
 		auto it = Slots.find(slot);
 		if (it == Slots.end())
 			return NOS_RESULT_INVALID_ARGUMENT;
 		ObjectRef ret = it->second->Destination;
-		*outObjectHandle = ret.Release();
+		*outRef = ret.Release();
 		return NOS_RESULT_SUCCESS;
 	}
 
@@ -310,7 +304,7 @@ struct Context
 		return false;
 	}
 
-	nosResult CreateCopyDestination(nosObjectHandle src, nosTransferCopyDestination* outDst)
+	nosResult CreateCopyDestination(nosObjectId src, nosTransferCopyDestination* outDst)
 	{
 		if (!outDst)
 			return NOS_RESULT_INVALID_ARGUMENT;
@@ -335,7 +329,7 @@ struct Context
 		return NOS_RESULT_SUCCESS;
 	}
 
-	nosResult PopulateCopyDestinationNode(nosObjectHandle obj, CopyDestinationNode& node)
+	nosResult PopulateCopyDestinationNode(nosObjectId obj, CopyDestinationNode& node)
 	{
 		nosObjectKind kind{};
 		if (NOS_RESULT_SUCCESS != nosEngine.ObjectAPI->GetObjectKind(obj, &kind))
@@ -354,13 +348,16 @@ struct Context
 				std::vector<CompositeObjectField> changedFields;
 				for (auto& field : compositeObj)
 				{
-					node.CompositeChildren[field.Name] = std::make_unique<CopyDestinationNode>();
-					auto res = PopulateCopyDestinationNode(field.Object, *node.CompositeChildren[field.Name]);
+					auto& newChild = *(node.CompositeChildren[field.Name] = std::make_unique<CopyDestinationNode>());
+					auto res = PopulateCopyDestinationNode(field.Object, newChild);
 					if (res != NOS_RESULT_SUCCESS)
 						return res;
-					if (field.Object.Handle != node.CompositeChildren[field.Name]->Destination.Handle)
+					if (field.Object != newChild.Destination)
 					{
-						changedFields.push_back({field.Name, node.CompositeChildren[field.Name]->Destination});
+						CompositeObjectField changed;
+						changed.Name = field.Name;
+						changed.Object = newChild.Destination;
+						changedFields.emplace_back(std::move(changed));
 					}
 				}
 				if (changedFields.empty())
@@ -388,7 +385,7 @@ struct Context
 					auto res = PopulateCopyDestinationNode(element, *node.ArrayChildren[idx]);
 					if (res != NOS_RESULT_SUCCESS)
 						return res;
-					if (element.Handle != node.ArrayChildren[idx]->Destination.Handle)
+					if (element != node.ArrayChildren[idx]->Destination)
 					{
 						if (append)
 							changedElements.push_back(ArrayObjectDelta::Append(node.ArrayChildren[idx]->Destination));
@@ -432,22 +429,22 @@ nosResult NOSAPI_CALL UnregisterCopyFunctions(nosName objectTypeName)
 	return GContext.UnregisterCopyFunctions(objectTypeName);
 }
 
-nosResult NOSAPI_CALL Copy(nosObjectHandle src, nosTransferCopyDestination dst)
+nosResult NOSAPI_CALL Copy(nosObjectId src, nosTransferCopyDestination dst)
 {
 	return GContext.Copy(src, dst);
 }
 
-nosBool NOSAPI_CALL CanCopy(nosObjectHandle src, nosTransferCopyDestination dst)
+nosBool NOSAPI_CALL CanCopy(nosObjectId src, nosTransferCopyDestination dst)
 {
 	return GContext.CanCopy(src, dst);
 }
 
-nosResult NOSAPI_CALL GetObjectHandle(nosObjectHandle src, nosObjectHandle* outObjectHandle)
+nosResult NOSAPI_CALL GetObjectReference(nosTransferCopyDestination slot, nosObjectReference* outRef)
 {
-	return GContext.GetObjectHandle(src, outObjectHandle);
+	return GContext.GetObjectReference(slot, outRef);
 }
 
-nosResult NOSAPI_CALL CreateCopyDestination(nosObjectHandle src, nosTransferCopyDestination* outDestination)
+nosResult NOSAPI_CALL CreateCopyDestination(nosObjectId src, nosTransferCopyDestination* outDestination)
 {
 	return GContext.CreateCopyDestination(src, outDestination);
 }
@@ -470,7 +467,7 @@ NOSAPI_ATTR nosResult NOSAPI_CALL OnRequest(uint32_t minor, void** outApi)
 	subsystem.UnregisterCopyFunctions = UnregisterCopyFunctions;
 	subsystem.CanCopy = CanCopy;
 	subsystem.Copy = Copy;
-	subsystem.GetObjectHandle = GetObjectHandle;
+	subsystem.GetObjectReference = GetObjectReference;
 	subsystem.CreateCopyDestination = CreateCopyDestination;
 	subsystem.ReleaseCopyDestination = ReleaseCopyDestination;
 
