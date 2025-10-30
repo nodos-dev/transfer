@@ -23,6 +23,12 @@ typedef struct nosTransferCopyFunctions
 	nosResult (NOSAPI_CALL* Copy)(nosObjectId src, nosObjectId dst, nosObjectReference* outNewDst);
 } nosTransferCopyFunctions;
 
+typedef struct nosTransferCrossProcessSyncFunctions
+{
+	nosResult(NOSAPI_CALL* OnExecuteNode)(uint64_t frameNumber, nosUUID nodeId);
+	nosResult(NOSAPI_CALL* Recover)(nosUUID nodeId, uint64_t frameCount);
+} nosTransferCrossProcessSyncFunctions;
+
 typedef struct nosTransferSubsystem {
 	nosResult (NOSAPI_CALL* RegisterCopyFunctions)(nosName objectTypeName, const nosTransferCopyFunctions* functions);
 	nosResult (NOSAPI_CALL* UnregisterCopyFunctions)(nosName objectTypeName);
