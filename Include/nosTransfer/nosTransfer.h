@@ -23,11 +23,11 @@ typedef struct nosTransferCopyFunctions
 	nosResult (NOSAPI_CALL* Copy)(nosObjectId src, nosObjectId dst, nosObjectReference* outNewDst);
 } nosTransferCopyFunctions;
 
-typedef struct nosTransferCrossProcessSyncFunctions
+typedef struct nosTransferExternalSyncFunctions
 {
-	nosResult(NOSAPI_CALL* OnExecuteNode)(uint64_t frameNumber, nosUUID nodeId);
+	nosResult(NOSAPI_CALL* OnExecuteNode)(nosUUID nodeId, uint64_t frameNumber);
 	nosResult(NOSAPI_CALL* Recover)(nosUUID nodeId, uint64_t frameCount);
-} nosTransferCrossProcessSyncFunctions;
+} nosTransferExternalSyncFunctions;
 
 typedef struct nosTransferSubsystem {
 	nosResult (NOSAPI_CALL* RegisterCopyFunctions)(nosName objectTypeName, const nosTransferCopyFunctions* functions);
@@ -49,6 +49,15 @@ typedef struct nosTransferSubsystem {
 	nosResult (NOSAPI_CALL* Copy)(nosObjectId src, nosTransferCopyDestination dst);
 	nosBool (NOSAPI_CALL* CanCopy)(nosObjectId src, nosTransferCopyDestination dst);
 	nosResult (NOSAPI_CALL* GetObjectReference)(nosTransferCopyDestination dst, nosObjectReference* outRef);
+
+	struct ExternalSyncService
+	{
+		nosResult (NOSAPI_CALL* RegisterFunctions)(nosName pluginName, const nosTransferExternalSyncFunctions* functions);
+		nosResult (NOSAPI_CALL* UnregisterFunctions)(nosName pluginName);
+		nosResult (NOSAPI_CALL* SubscribeNodeExecution)(nosName pluginName, nosUUID nodeId);
+		nosResult (NOSAPI_CALL* UnsubscribeNodeExecution)(nosName pluginName, nosUUID nodeId);
+		nosResult (NOSAPI_CALL* ExecuteNode)(nosUUID nodeId, uint64_t frameNumber);
+	} ExternalSync;
 } nosTransferSubsystem;
 
 #pragma region Helper Declarations & Macros
