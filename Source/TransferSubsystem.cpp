@@ -446,25 +446,39 @@ nosResult NOSAPI_CALL ReleaseCopyDestination(nosTransferCopyDestination dst)
 	return GCopyContext.ReleaseCopyDestination(dst);
 }
 
+std::string GetItemUri(nosUUID itemId)
+{
+	char itemUri[512];
+	size_t itemUriSize = sizeof(itemUri);
+	nosEngine.GetItemUri(itemId, itemUri, &itemUriSize);
+	return std::string(itemUri, itemUriSize);
+}
+
 struct ExternalSyncContext
 {
-	nosResult ExecuteNode(nosUUID nodeId, uint64_t frameNumber)
+	nosResult ExecuteNode(nosNodeExecuteParams& params, uint64_t frameNumber)
 	{
 		std::shared_lock lock(Mutex);
-		auto it = NodeSubscriptions.find(nodeId);
+		auto it = NodeSubscriptions.find(params.NodeId);
 		if (it == NodeSubscriptions.end())
+		{
+			nosEngine.LogW("ExecuteNode: Node %s not subscribed for external sync", GetItemUri(params.NodeId).c_str());
 			return NOS_RESULT_NOT_FOUND;
+		}
 		const nosName& pluginName = it->second;
 		auto pit = RegisteredPlugins.find(pluginName);
 		if (pit == RegisteredPlugins.end())
+		{
+			nosEngine.LogW("ExecuteNode: Plugin %s not registered for external sync", nos::Name(pluginName).AsCStr());
 			return NOS_RESULT_NOT_FOUND;
+		}
 		const auto& functions = pit->second;
 		if (functions.OnExecuteNode)
-			return functions.OnExecuteNode(nodeId, frameNumber);
+			return functions.OnExecuteNode(&params, frameNumber);
 		return NOS_RESULT_NOT_IMPLEMENTED;
 	}
 
-	nosResult Recover(nosUUID nodeId, uint64_t frameCount)
+	nosResult Recover(nosUUID nodeId, uint64_t frameNumber)
 	{
 		std::shared_lock lock(Mutex);
 		auto it = NodeSubscriptions.find(nodeId);
@@ -476,7 +490,7 @@ struct ExternalSyncContext
 			return NOS_RESULT_NOT_FOUND;
 		const auto& functions = pit->second;
 		if (functions.Recover)
-			return functions.Recover(nodeId, frameCount);
+			return functions.Recover(nodeId, frameNumber);
 		return NOS_RESULT_NOT_IMPLEMENTED;
 	}
 
@@ -484,6 +498,9 @@ struct ExternalSyncContext
 	{
 		std::unique_lock lock(Mutex);
 		NodeSubscriptions[nodeId] = pluginName;
+		nosEngine.LogD("Node %s subscribed for external sync by plugin %s",
+					   GetItemUri(nodeId).c_str(),
+					   nos::Name(pluginName).AsCStr());
 		return NOS_RESULT_SUCCESS;
 	}
 
@@ -494,13 +511,16 @@ struct ExternalSyncContext
 		if (it != NodeSubscriptions.end() && it->second == pluginName)
 		{
 			NodeSubscriptions.erase(it);
+			nosEngine.LogW("Node %s unsubscribed from external sync by plugin %s",
+						   GetItemUri(nodeId).c_str(),
+						   nos::Name(pluginName).AsCStr());
 			return NOS_RESULT_SUCCESS;
 		}
 		return NOS_RESULT_NOT_FOUND;
 	}
 
 	std::unordered_map<nosName, nosTransferExternalSyncFunctions> RegisteredPlugins;
-	std::unordered_map<nosUUID, nosName> NodeSubscriptions;
+	std::unordered_map<nos::uuid, nosName> NodeSubscriptions;
 	std::shared_mutex Mutex;
 
 	nosResult RegisterFunctions(nosName pluginName, nosTransferExternalSyncFunctions const* functions)
@@ -543,14 +563,14 @@ nosResult NOSAPI_CALL UnsubscribeNodeExecutionForExternalSync(nosName pluginName
 	return GExternalSyncContext.UnsubscribeNodeExecution(pluginName, nodeId);
 }
 
-nosResult NOSAPI_CALL ExecuteNodeForExternalSync(nosUUID nodeId, uint64_t frameNumber)
+nosResult NOSAPI_CALL ExecuteNodeForExternalSync(nosNodeExecuteParams* params, uint64_t frameCounter)
 {
-	return GExternalSyncContext.ExecuteNode(nodeId, frameNumber);
+	return GExternalSyncContext.ExecuteNode(*params, frameCounter);
 }
 
-nosResult NOSAPI_CALL RecoverExternalSync(nosUUID nodeId, uint64_t frameCount)
+nosResult NOSAPI_CALL RecoverExternalSync(nosUUID nodeId, uint64_t frameCounter)
 {
-	return GExternalSyncContext.Recover(nodeId, frameCount);
+	return GExternalSyncContext.Recover(nodeId, frameCounter);
 }
 
 std::unordered_map<uint32_t, std::unique_ptr<nosTransferSubsystem>> GExportedApiVersions;

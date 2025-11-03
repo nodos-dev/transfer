@@ -25,8 +25,8 @@ typedef struct nosTransferCopyFunctions
 
 typedef struct nosTransferExternalSyncFunctions
 {
-	nosResult(NOSAPI_CALL* OnExecuteNode)(nosUUID nodeId, uint64_t frameNumber);
-	nosResult(NOSAPI_CALL* Recover)(nosUUID nodeId, uint64_t frameCount);
+	nosResult(NOSAPI_CALL* OnExecuteNode)(nosNodeExecuteParams* params, uint64_t frameCounter);
+	nosResult(NOSAPI_CALL* Recover)(nosUUID nodeId, uint64_t frameCounter);
 } nosTransferExternalSyncFunctions;
 
 typedef struct nosTransferSubsystem {
@@ -56,7 +56,7 @@ typedef struct nosTransferSubsystem {
 		nosResult (NOSAPI_CALL* UnregisterFunctions)(nosName pluginName);
 		nosResult (NOSAPI_CALL* SubscribeNodeExecution)(nosName pluginName, nosUUID nodeId);
 		nosResult (NOSAPI_CALL* UnsubscribeNodeExecution)(nosName pluginName, nosUUID nodeId);
-		nosResult (NOSAPI_CALL* ExecuteNode)(nosUUID nodeId, uint64_t frameNumber);
+		nosResult (NOSAPI_CALL* ExecuteNode)(nosNodeExecuteParams* params, uint64_t frameCounter);
 	} ExternalSync;
 } nosTransferSubsystem;
 
