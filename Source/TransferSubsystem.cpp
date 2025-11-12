@@ -456,7 +456,7 @@ std::string GetItemUri(nosUUID itemId)
 
 struct ExternalSyncContext
 {
-	nosResult ExecuteNode(nosNodeExecuteParams& params, uint64_t frameNumber)
+	nosResult ExecuteNode(nosNodeExecuteParams& params, uint64_t frameNumber, nosExternalSyncState state)
 	{
 		std::shared_lock lock(Mutex);
 		auto it = NodeSubscriptions.find(params.NodeId);
@@ -474,7 +474,7 @@ struct ExternalSyncContext
 		}
 		const auto& functions = pit->second;
 		if (functions.OnExecuteNode)
-			return functions.OnExecuteNode(&params, frameNumber);
+			return functions.OnExecuteNode(&params, frameNumber, state);
 		return NOS_RESULT_NOT_IMPLEMENTED;
 	}
 
@@ -563,9 +563,9 @@ nosResult NOSAPI_CALL UnsubscribeNodeExecutionForExternalSync(nosName pluginName
 	return GExternalSyncContext.UnsubscribeNodeExecution(pluginName, nodeId);
 }
 
-nosResult NOSAPI_CALL ExecuteNodeForExternalSync(nosNodeExecuteParams* params, uint64_t frameCounter)
+nosResult NOSAPI_CALL ExecuteNodeForExternalSync(nosNodeExecuteParams* params, uint64_t frameCounter, nosExternalSyncState state)
 {
-	return GExternalSyncContext.ExecuteNode(*params, frameCounter);
+	return GExternalSyncContext.ExecuteNode(*params, frameCounter, state);
 }
 
 nosResult NOSAPI_CALL RecoverExternalSync(nosUUID nodeId, uint64_t frameCounter)

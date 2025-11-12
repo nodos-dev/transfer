@@ -23,9 +23,15 @@ typedef struct nosTransferCopyFunctions
 	nosResult (NOSAPI_CALL* Copy)(nosObjectId src, nosObjectId dst, nosObjectReference* outNewDst);
 } nosTransferCopyFunctions;
 
+typedef enum nosExternalSyncState
+{
+	NOS_EXTERNAL_SYNC_STATE_UNSYNCED = 0,
+	NOS_EXTERNAL_SYNC_STATE_SYNCED = 1,
+} nosExternalSyncState;
+
 typedef struct nosTransferExternalSyncFunctions
 {
-	nosResult(NOSAPI_CALL* OnExecuteNode)(nosNodeExecuteParams* params, uint64_t frameCounter);
+	nosResult(NOSAPI_CALL* OnExecuteNode)(nosNodeExecuteParams* params, uint64_t frameCounter, nosExternalSyncState state);
 	nosResult(NOSAPI_CALL* Recover)(nosUUID nodeId, uint64_t frameCounter);
 } nosTransferExternalSyncFunctions;
 
@@ -56,7 +62,7 @@ typedef struct nosTransferSubsystem {
 		nosResult (NOSAPI_CALL* UnregisterFunctions)(nosName pluginName);
 		nosResult (NOSAPI_CALL* SubscribeNodeExecution)(nosName pluginName, nosUUID nodeId);
 		nosResult (NOSAPI_CALL* UnsubscribeNodeExecution)(nosName pluginName, nosUUID nodeId);
-		nosResult (NOSAPI_CALL* ExecuteNode)(nosNodeExecuteParams* params, uint64_t frameCounter);
+		nosResult (NOSAPI_CALL* ExecuteNode)(nosNodeExecuteParams* params, uint64_t frameCounter, nosExternalSyncState state);
 	} ExternalSync;
 } nosTransferSubsystem;
 
