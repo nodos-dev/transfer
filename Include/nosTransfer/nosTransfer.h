@@ -32,7 +32,7 @@ typedef enum nosExternalSyncState
 typedef struct nosTransferExternalSyncFunctions
 {
 	nosResult(NOSAPI_CALL* OnExecuteNode)(nosNodeExecuteParams* params, uint64_t frameCounter, nosExternalSyncState state);
-	nosResult(NOSAPI_CALL* Recover)(nosUUID nodeId, uint64_t frameCounter);
+	nosResult(NOSAPI_CALL* Recover)(nosUUID nodeId, uint64_t frameCounter, uint64_t lastReceivedFrameCounter);
 } nosTransferExternalSyncFunctions;
 
 typedef struct nosTransferSubsystem {
@@ -63,6 +63,7 @@ typedef struct nosTransferSubsystem {
 		nosResult (NOSAPI_CALL* SubscribeNodeExecution)(nosName pluginName, nosUUID nodeId);
 		nosResult (NOSAPI_CALL* UnsubscribeNodeExecution)(nosName pluginName, nosUUID nodeId);
 		nosResult (NOSAPI_CALL* ExecuteNode)(nosNodeExecuteParams* params, uint64_t frameCounter, nosExternalSyncState state);
+		nosResult (NOSAPI_CALL* Recover)(nosUUID nodeId, uint64_t frameCounter, uint64_t lastReceivedFrameCounter);
 	} ExternalSync;
 } nosTransferSubsystem;
 
