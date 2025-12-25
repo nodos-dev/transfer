@@ -11,5 +11,6 @@
     "binary_path": "Binaries/nosTransfer",
     "defaults": [],
     "custom_types": [],
-    "sdk_version": "41.0"
+    "sdk_version": "41.0",
+    "schema_version": "1.4-v1"
 }
