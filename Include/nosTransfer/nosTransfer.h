@@ -5,12 +5,12 @@
 #ifndef NOS_TRANSFER_H_INCLUDED
 #define NOS_TRANSFER_H_INCLUDED
 
+#include <Nodos/PluginAPI.h>
+
 #if __cplusplus
 extern "C"
 {
 #endif
-
-#include <Nodos/PluginAPI.h>
 
 typedef nosResult(*nosPfnCopyObject)(nosObjectId src, nosObjectId dst);
 
