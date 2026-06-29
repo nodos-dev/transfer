@@ -21,6 +21,11 @@ typedef struct nosTransferCopyFunctions
 	/// Checks whether the destination is suitable for copying the source object into it.
 	nosBool (NOSAPI_CALL* CanCopy)(nosObjectId src, nosObjectId dst);
 	nosResult (NOSAPI_CALL* Copy)(nosObjectId src, nosObjectId dst, nosObjectReference* outNewDst);
+	/// Optional. Returns how many phases the object spans (e.g. 2 for interlaced video, 1 otherwise).
+	/// If null, the object is assumed to have a phase count of 1. When outWarning is non-null, it may be set to
+	/// a message name describing why the phase count must be respected (e.g. interlaced fields), so consumers can
+	/// surface it without knowing the object's nature; it is left untouched when the type has nothing to say.
+	uint64_t (NOSAPI_CALL* GetPhaseCount)(nosObjectId obj, nosName* outWarning);
 } nosTransferCopyFunctions;
 
 typedef struct nosTransferExternalSyncFunctions
@@ -50,6 +55,11 @@ typedef struct nosTransferSubsystem {
 	nosResult (NOSAPI_CALL* Copy)(nosObjectId src, nosTransferCopyDestination dst);
 	nosBool (NOSAPI_CALL* CanCopy)(nosObjectId src, nosTransferCopyDestination dst);
 	nosResult (NOSAPI_CALL* GetObjectReference)(nosTransferCopyDestination dst, nosObjectReference* outRef);
+	/// Returns the phase count of the object, as reported by the copy functions registered for its type
+	/// (e.g. For textures, 2 for interlaced video, 1 otherwise). Defaults to 1 if no provider is registered.
+	/// When outWarning is non-null, it is set to a message name describing the phase-count constraint, or to 0
+	/// when there is none.
+	nosResult (NOSAPI_CALL* GetPhaseCount)(nosObjectId obj, uint64_t* outPhaseCount, nosName* outWarning);
 
 	struct ExternalSyncService
 	{

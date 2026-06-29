@@ -36,4 +36,14 @@ struct Slot
 		return obj;
 	}
 };
+
+inline uint64_t GetPhaseCount(nosObjectId obj, std::optional<std::string>* outWarning = nullptr)
+{
+	uint64_t phaseCount = 1;
+	nosName warning{};
+	nosTransfer->GetPhaseCount(obj, &phaseCount, &warning);
+	if (outWarning)
+		*outWarning = warning.ID ? std::optional(nos::Name(warning).AsString()) : std::nullopt;
+	return phaseCount;
+}
 }

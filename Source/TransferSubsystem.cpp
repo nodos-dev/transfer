@@ -238,6 +238,27 @@ struct CopyContext
 		return it->second.CanCopy(src, *copyDst);
 	}
 
+	nosResult GetPhaseCount(nosObjectId obj, uint64_t* outPhaseCount, nosName* outWarning)
+	{
+		if (!outPhaseCount)
+			return NOS_RESULT_INVALID_ARGUMENT;
+		*outPhaseCount = 1;
+		if (outWarning)
+			*outWarning = nosName{};
+		std::shared_lock lock(CopyMutex);
+		nosName typeName{};
+		if (nosEngine.ObjectAPI->GetObjectTypeName(obj, &typeName) != NOS_RESULT_SUCCESS)
+			return NOS_RESULT_INVALID_ARGUMENT;
+		auto it = CopyFunctions.find(typeName);
+		if (it == CopyFunctions.end() || !it->second.GetPhaseCount)
+			return NOS_RESULT_SUCCESS;
+		auto getPhaseCount = it->second.GetPhaseCount;
+		lock.unlock();
+		if (auto phaseCount = getPhaseCount(obj, outWarning))
+			*outPhaseCount = phaseCount;
+		return NOS_RESULT_SUCCESS;
+	}
+
 	std::optional<ObjectRef> GetCopyDestination(nosTransferCopyDestination slot)
 	{
 		auto it = Slots.find(slot);
@@ -436,6 +457,11 @@ nosResult NOSAPI_CALL GetObjectReference(nosTransferCopyDestination slot, nosObj
 	return GCopyContext.GetObjectReference(slot, outRef);
 }
 
+nosResult NOSAPI_CALL GetPhaseCount(nosObjectId obj, uint64_t* outPhaseCount, nosName* outWarning)
+{
+	return GCopyContext.GetPhaseCount(obj, outPhaseCount, outWarning);
+}
+
 nosResult NOSAPI_CALL CreateCopyDestination(nosObjectId src, nosTransferCopyDestination* outDestination)
 {
 	return GCopyContext.CreateCopyDestination(src, outDestination);
@@ -603,6 +629,7 @@ NOSAPI_ATTR nosResult NOSAPI_CALL OnRequest(uint32_t minor, void** outApi)
 	subsystem.CanCopy = CanCopy;
 	subsystem.Copy = Copy;
 	subsystem.GetObjectReference = GetObjectReference;
+	subsystem.GetPhaseCount = GetPhaseCount;
 	subsystem.CreateCopyDestination = CreateCopyDestination;
 	subsystem.ReleaseCopyDestination = ReleaseCopyDestination;
 
